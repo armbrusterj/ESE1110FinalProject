@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Node / web app
+node_modules/
+dist/
+build/
+.next/
+*.log
