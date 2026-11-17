@@ -1,0 +1,7 @@
+{
+  "folders": [
+    { "path": "embedded" },
+    { "path": "app" },
+    { "path": "." }
+  ]
+}
