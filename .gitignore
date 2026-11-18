@@ -12,3 +12,11 @@ dist/
 build/
 .next/
 *.log
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
+.build/
+# The app's Xcode project is generated from app/project.yml by XcodeGen.
+app/DMXtra.xcodeproj/

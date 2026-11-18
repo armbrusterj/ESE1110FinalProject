@@ -1,0 +1,92 @@
+# XcodeGen spec for the DMXtra controller app.
+# Generate the project with:  xcodegen generate   (run in app/)
+name: DMXtra
+
+options:
+  bundleIdPrefix: edu.upenn.ese1110
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # iOS: automatic signing; set DEVELOPMENT_TEAM (or pick a team in Xcode) to run on a phone.
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  DMXtra:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: DMXtra
+        excludes:
+          - "Info.plist"
+          - "DMXtra-macOS.entitlements"
+    info:
+      path: DMXtra/Info.plist
+      properties:
+        CFBundleDisplayName: DMXtra
+        # The controller speaks plain HTTP on the local network, reached by a raw IP.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: DMXtra talks to your DMX lighting controller on the local network.
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        LSApplicationCategoryType: public.app-category.utilities
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: edu.upenn.ese1110.DMXtra
+        PRODUCT_NAME: DMXtra
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        # macOS only: App Sandbox with outgoing network connections (client).
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": DMXtra/DMXtra-macOS.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        # macOS: ad-hoc "Sign to Run Locally", so it builds and runs with no team.
+        "CODE_SIGN_STYLE[sdk=macosx*]": Manual
+        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
+
+  DMXtraTests:
+    type: bundle.unit-test
+    supportedDestinations: [iOS, macOS]
+    sources: [DMXtraTests]
+    dependencies:
+      - target: DMXtra
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: edu.upenn.ese1110.DMXtraTests
+        # The app binary lives in Contents/MacOS on macOS.
+        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/DMXtra.app/Contents/MacOS/DMXtra"
+        # macOS: ad-hoc "Sign to Run Locally", so it builds and runs with no team.
+        "CODE_SIGN_STYLE[sdk=macosx*]": Manual
+        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
+
+schemes:
+  DMXtra:
+    build:
+      targets:
+        DMXtra: all
+        DMXtraTests: [test]
+    test:
+      targets: [DMXtraTests]
+      gatherCoverageData: false
+    run:
+      config: Debug
