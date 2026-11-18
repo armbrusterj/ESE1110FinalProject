@@ -16,12 +16,12 @@ app/
 │   ├── DMXtraApp.swift
 │   ├── Info.plist           written by XcodeGen from project.yml
 │   ├── DMXtra-macOS.entitlements
+│   ├── Assets.xcassets/     App icon (iOS 1024 master + macOS sizes)
 │   ├── Model/               Codable models, patch maths, update throttle
 │   ├── Networking/          ControllerClient actor, errors, address parsing
 │   ├── State/AppModel.swift @Observable app state, polling, hold-back while editing
 │   └── Views/               Fixtures, fixture control, patch editing, universe, controller
-├── DMXtraTests/             Swift Testing unit tests (+ opt-in mock-server integration tests)
-└── tools/mock_server.py     Mock controller, standard library only
+└── DMXtraTests/             Swift Testing unit tests (+ opt-in integration tests against a controller)
 ```
 
 ## Generate the project
@@ -42,25 +42,26 @@ Then open `DMXtra.xcodeproj` and pick the **DMXtra** scheme with a Mac or iOS Si
 
 ## Run it
 
-### Against the mock server (no board needed)
+### Against the simulator (no board needed)
+
+The Rust desktop simulator in [`../simulator`](../simulator) serves the same API as the firmware
+and shows what each light is putting out. Start it from the repository root:
 
 ```bash
-cd app && python3 tools/mock_server.py --port 8080
+cd simulator && cargo run --release
 ```
 
 In the app, open the **Controller** tab and enter `127.0.0.1:8080` (Mac or iOS Simulator).
 
-To reach the mock from a phone on the same WiFi, bind it to every interface and use the Mac's
+To reach the simulator from a phone on the same WiFi, bind it to every interface and use the Mac's
 IP address in the app:
 
 ```bash
-python3 tools/mock_server.py --host 0.0.0.0 --port 8080
+cd simulator && cargo run --release -- --host 0.0.0.0 --port 8080
 ```
 
-Options: `--latency 30` adds 30 ms to each request to feel more like the board; `--quiet` stops
-the request log. The mock copies the firmware: default patch ("Wash 1" at 1, "Wash 2" at 4),
-status codes and error messages, overlap rules, the 32-fixture limit (507), the 4096-byte body
-limit (413), one connection at a time, and `Connection: close` on every response.
+`--latency 30` adds 30 ms to each request to feel more like the board. See
+[`../simulator/README.md`](../simulator/README.md) for the rest.
 
 ### Against the board
 
@@ -89,7 +90,7 @@ cd app && xcodebuild -project DMXtra.xcodeproj -scheme DMXtra -destination 'gene
 
 Unit tests cover model decoding (using the JSON from API.md), the rate-limiting logic, and the
 next-free-address calculation. The `MockServerIntegrationTests` suite drives the real
-`ControllerClient` and `AppModel` against a running mock (or board). It is skipped unless
+`ControllerClient` and `AppModel` against a running simulator (or board). It is skipped unless
 `DMXTRA_MOCK_URL` is set. Note that it changes the controller's state and ends with a blackout:
 
 ```bash

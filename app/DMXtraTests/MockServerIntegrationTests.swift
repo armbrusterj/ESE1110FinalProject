@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import DMXtra
 
-/// End-to-end checks against `tools/mock_server.py` (or a real board).
+/// End-to-end checks against the Rust simulator in `simulator/` (or a real board).
 /// Skipped unless DMXTRA_MOCK_URL is set, e.g.:
 ///
-///     python3 tools/mock_server.py --port 8080 &
+///     (cd simulator && cargo run --release) &
 ///     TEST_RUNNER_DMXTRA_MOCK_URL=127.0.0.1:8080 xcodebuild test ...
 ///
 /// These tests change the controller's state (they add and remove a fixture,
