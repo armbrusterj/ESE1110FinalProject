@@ -1,0 +1,10 @@
+[package]
+name = "dmxtra-simulator"
+version = "0.1.0"
+edition = "2021"
+description = "Desktop simulator for the DMXtra controller: same HTTP API as /embedded, with an egui view of the lights"
+
+[dependencies]
+eframe = "0.37"
+serde_json = { version = "1", features = ["preserve_order"] }
+tiny_http = "0.12"
