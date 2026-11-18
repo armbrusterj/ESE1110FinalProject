@@ -32,6 +32,9 @@ impl SimApp {
     }
 }
 
+/// Inner width of a light or fixture card.
+const CARD_WIDTH: f32 = 190.0;
+
 /// The colour a light would actually emit for its channel values.
 fn light_color(ty: &FixtureType, v: &[u8]) -> Color32 {
     let ch = |i: usize| v.get(i).copied().unwrap_or(0) as f32;
@@ -72,13 +75,12 @@ fn draw_bulb(ui: &mut egui::Ui, color: Color32, size: f32) {
     p.circle_stroke(c, r, Stroke::new(2.0, Color32::from_gray(90)));
 }
 
-/// How the light at this address relates to the controller's patch.
+/// How a light relates to the controller's patch.
 fn patch_status(sim: &Sim, l: &Light) -> (Color32, String) {
-    let count = l.ty().channel_count();
-    if let Some(f) = sim.fixtures.iter().find(|f| f.address == l.address && f.type_idx == l.type_idx) {
-        return (Color32::from_rgb(90, 200, 120), format!("patched as \"{}\" (#{})", f.name, f.id));
+    if let Some(f) = sim.linked_fixture(l) {
+        return (Color32::from_rgb(90, 200, 120), format!("patched as fixture #{}", f.id));
     }
-    let end = l.address + count;
+    let end = l.address + l.ty().channel_count();
     if let Some(f) = sim.fixtures.iter().find(|f| l.address < f.address + f.ty().channel_count() && f.address < end) {
         return (Color32::from_rgb(230, 170, 60), format!("overlaps \"{}\" (#{})", f.name, f.id));
     }
@@ -121,24 +123,34 @@ impl eframe::App for SimApp {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.heading("Lights");
                 ui.label(
-                    RichText::new("Each light listens on a fixed start address, like DIP switches on real hardware.")
-                        .weak(),
+                    RichText::new(
+                        "One card per light on the DMX line, showing what it puts out. Every patched fixture \
+                         has one, whether it was added here or by a client over HTTP. Change a card's \
+                         address to re-patch it.",
+                    )
+                    .weak(),
                 );
                 ui.add_space(6.0);
                 let mut remove = None;
-                ui.horizontal_wrapped(|ui| {
-                    for i in 0..sim.lights.len() {
-                        if light_card(ui, &mut sim, i) {
-                            remove = Some(i);
+                // Lay the cards out in rows that fit the panel. (horizontal_wrapped can't
+                // wrap these: it doesn't know a card's width until it has drawn it.)
+                let card_w = CARD_WIDTH + 20.0 + ui.spacing().item_spacing.x + 4.0;
+                let per_row = ((ui.available_width() / card_w).floor() as usize).max(1);
+                let total = sim.lights.len();
+                for row_start in (0..total).step_by(per_row) {
+                    ui.horizontal_top(|ui| {
+                        for i in row_start..(row_start + per_row).min(total) {
+                            if light_card(ui, &mut sim, i) {
+                                remove = Some(i);
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 if let Some(i) = remove {
-                    let l = sim.lights.remove(i);
-                    sim.log(format!("UI removed light \"{}\"", l.name));
+                    remove_device(&mut sim, i);
                 }
                 if sim.lights.is_empty() {
-                    ui.label("No lights. Add one on the right.");
+                    ui.label("No lights. Add one on the right, or patch a fixture from the app.");
                 }
                 ui.add_space(12.0);
                 egui::CollapsingHeader::new("Universe (channels 1-512)").default_open(true).show(ui, |ui| {
@@ -185,9 +197,16 @@ impl SimApp {
                 self.message = Some((true, "Can't patch: patch is full.".into()));
             } else {
                 if self.also_patch {
+                    // Same path as POST /fixtures, so it gets the same linked light.
                     sim.add_fixture(&name, self.new_type, self.new_address);
+                } else {
+                    sim.lights.push(Light {
+                        name: name.clone(),
+                        type_idx: self.new_type,
+                        address: self.new_address,
+                        fixture_id: None,
+                    });
                 }
-                sim.lights.push(Light { name: name.clone(), type_idx: self.new_type, address: self.new_address });
                 sim.log(format!("UI added light \"{name}\" at {}", self.new_address));
                 self.message = Some((false, format!("Added \"{name}\".")));
                 // Get the form ready for the next one.
@@ -207,43 +226,83 @@ fn light_card(ui: &mut egui::Ui, sim: &mut Sim, i: usize) -> bool {
     let mut removed = false;
     let light = sim.lights[i].clone();
     let ty = light.ty();
+    let count = ty.channel_count();
     let values = sim.light_values(&light).to_vec();
     let (status_color, status) = patch_status(sim, &light);
+    let linked = sim.linked_fixture(&light).cloned();
+    let title = linked.as_ref().map_or(light.name.clone(), |f| f.name.clone());
+    let mut address = light.address;
 
     egui::Frame::group(ui.style()).inner_margin(10.0).show(ui, |ui| {
-        ui.set_width(190.0);
+        ui.set_width(CARD_WIDTH);
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.strong(&light.name);
+                ui.strong(&title);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("Remove").on_hover_text("Remove light").clicked() {
+                    if ui.small_button("Remove").on_hover_text("Remove this light from the line and the patch").clicked() {
                         removed = true;
                     }
                 });
             });
             ui.vertical_centered(|ui| draw_bulb(ui, light_color(ty, &values), 120.0));
-            let end = light.address + ty.channel_count() - 1;
             ui.horizontal(|ui| {
                 ui.label(format!("{} @", ty.label));
-                let max = UNIVERSE_SIZE - ty.channel_count() + 1;
-                ui.add(egui::DragValue::new(&mut sim.lights[i].address).range(1..=max))
+                let max = UNIVERSE_SIZE - count + 1;
+                ui.add(egui::DragValue::new(&mut address).range(1..=max))
                     .on_hover_text("Start address (drag or type)");
-                ui.label(format!("– {end}"));
+                if count > 1 {
+                    ui.label(format!("– {}", light.address + count - 1));
+                }
             });
-            for (name, v) in ty.channels.iter().zip(&values) {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{name:>9}")).monospace());
-                    let bar = egui::ProgressBar::new(*v as f32 / 255.0)
-                        .desired_width(90.0)
-                        .fill(channel_color(name))
-                        .text(RichText::new(v.to_string()).monospace());
-                    ui.add(bar);
-                });
-            }
+            channel_bars(ui, ty, &values);
             ui.colored_label(status_color, RichText::new(status).small());
         });
     });
+
+    if address != light.address {
+        match linked {
+            // Re-patch, exactly like PATCH /fixtures/{id} with a new address. An address
+            // that would overlap another fixture is refused, as the API would refuse it.
+            Some(f) => {
+                if !sim.overlaps(address, count, Some(f.id)) {
+                    let idx = sim.find_fixture(f.id).unwrap();
+                    sim.move_fixture(idx, address);
+                    sim.log(format!("UI moved \"{}\" to {address}", f.name));
+                }
+            }
+            None => sim.lights[i].address = address,
+        }
+    }
     removed
+}
+
+fn channel_bars(ui: &mut egui::Ui, ty: &FixtureType, values: &[u8]) {
+    for (name, v) in ty.channels.iter().zip(values) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("{name:>9}")).monospace());
+            let bar = egui::ProgressBar::new(*v as f32 / 255.0).desired_width(78.0).fill(channel_color(name));
+            ui.add(bar);
+            // The value goes beside the bar, not on it, so it's readable on any fill color.
+            ui.label(RichText::new(format!("{v:>3}")).monospace());
+        });
+    }
+}
+
+/// Removes the light at `i`, and unpatches its fixture if it has one, exactly like
+/// DELETE /fixtures/{id}. Works the same whichever way the light was added.
+fn remove_device(sim: &mut Sim, i: usize) {
+    let light = sim.lights[i].clone();
+    match sim.linked_fixture(&light).map(|f| (f.id, f.name.clone())) {
+        Some((id, name)) => {
+            let idx = sim.find_fixture(id).unwrap();
+            sim.remove_fixture(idx); // also removes the light
+            sim.log(format!("UI removed \"{name}\" (fixture #{id})"));
+        }
+        None => {
+            sim.lights.remove(i);
+            sim.log(format!("UI removed light \"{}\"", light.name));
+        }
+    }
 }
 
 fn patch_list(ui: &mut egui::Ui, sim: &Sim) {
@@ -319,5 +378,68 @@ fn universe_grid(ui: &mut egui::Ui, sim: &Sim) {
             let ch = row as usize * COLS + col as usize + 1;
             resp.on_hover_text(format!("Channel {ch}: {}", sim.universe[ch - 1]));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::route;
+
+    fn rgb() -> usize {
+        find_type("rgb").unwrap()
+    }
+
+    #[test]
+    fn every_fixture_has_a_linked_light_however_it_was_added() {
+        let mut sim = Sim::new(); // "Wash 1" at 1 and "Wash 2" at 4
+        sim.add_fixture("Added in window", rgb(), 7); // what the Add light form does
+        route(&mut sim, "POST", "/fixtures", "", r#"{"name":"Added over HTTP","type":"rgb","address":10}"#);
+        assert_eq!(sim.lights.len(), 4);
+        for f in &sim.fixtures {
+            let lights: Vec<_> = sim.lights.iter().filter(|l| l.fixture_id == Some(f.id)).collect();
+            assert_eq!(lights.len(), 1, "{} should have exactly one light", f.name);
+            assert_eq!(lights[0].address, f.address);
+            assert_eq!(patch_status(&sim, lights[0]).1, format!("patched as fixture #{}", f.id));
+        }
+    }
+
+    #[test]
+    fn http_address_change_and_delete_carry_the_light_along() {
+        let mut sim = Sim::new();
+        route(&mut sim, "PATCH", "/fixtures/2", "", r#"{"address":20}"#);
+        assert_eq!(sim.lights[1].address, 20);
+        route(&mut sim, "DELETE", "/fixtures/2", "", "");
+        assert_eq!(sim.lights.len(), 1);
+    }
+
+    #[test]
+    fn removing_a_card_unpatches_its_fixture() {
+        let mut sim = Sim::new();
+        route(&mut sim, "POST", "/fixtures", "", r#"{"name":"Spot","type":"rgb","address":7}"#);
+        sim.universe[6] = 200;
+        remove_device(&mut sim, 2); // the Spot card
+        remove_device(&mut sim, 0); // the Wash 1 card
+        assert_eq!(sim.fixtures.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Wash 2"]);
+        assert_eq!(sim.lights.len(), 1);
+        assert_eq!(sim.universe[6], 0, "its channels are cleared, like DELETE /fixtures/{{id}}");
+    }
+
+    #[test]
+    fn unpatched_lights_stay_out_of_the_patch() {
+        let mut sim = Sim::new();
+        sim.lights.push(Light { name: "Extra".into(), type_idx: rgb(), address: 100, fixture_id: None });
+        assert_eq!(patch_status(&sim, &sim.lights[2]).1, "not patched");
+        remove_device(&mut sim, 2);
+        assert_eq!((sim.lights.len(), sim.fixtures.len()), (2, 2));
+    }
+
+    #[test]
+    fn patching_where_an_unpatched_light_sits_adopts_it() {
+        let mut sim = Sim::new();
+        sim.lights.push(Light { name: "Extra".into(), type_idx: rgb(), address: 100, fixture_id: None });
+        route(&mut sim, "POST", "/fixtures", "", r#"{"name":"Spot","type":"rgb","address":100}"#);
+        assert_eq!(sim.lights.len(), 3);
+        assert!(sim.lights[2].fixture_id.is_some());
     }
 }

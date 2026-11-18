@@ -297,14 +297,9 @@ fn update_fixture(sim: &mut Sim, idx: usize, body: &str) -> Reply {
     if let Some(n) = new_name {
         sim.fixtures[idx].name = n;
     }
-    if let Some(a) = new_address.filter(|a| *a != f.address) {
-        // The fixture's current look moves with it; old channels go dark.
-        let current: Vec<u8> = sim.fixture_values(&f).to_vec();
-        for i in 0..count {
-            sim.universe[f.address - 1 + i] = 0;
-        }
-        sim.universe[a - 1..a - 1 + count].copy_from_slice(&current);
-        sim.fixtures[idx].address = a;
+    if let Some(a) = new_address {
+        // The fixture's current look and its light move with it; old channels go dark.
+        sim.move_fixture(idx, a);
     }
     if let Some(vals) = values {
         let addr = sim.fixtures[idx].address;
